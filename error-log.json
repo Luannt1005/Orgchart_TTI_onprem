@@ -1,0 +1,5 @@
+{
+  "message": "SASL: SCRAM-SERVER-FIRST-MESSAGE: client password must be a string",
+  "stack": "Error: SASL: SCRAM-SERVER-FIRST-MESSAGE: client password must be a string\n    at C:\\Users\\luan.nguyen\\Desktop\\Org postges\\OrgChart_TTI_SHTP_Project_Postgres\\node_modules\\pg-pool\\index.js:45:11\n    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)\n    at async getDbConnection (C:\\Users\\luan.nguyen\\Desktop\\Org postges\\OrgChart_TTI_SHTP_Project_Postgres\\src\\lib\\db.ts:27:24)\n    at async runSchema (C:\\Users\\luan.nguyen\\Desktop\\Org postges\\OrgChart_TTI_SHTP_Project_Postgres\\scripts\\run-schema.ts:11:16)",
+  "details": {}
+}

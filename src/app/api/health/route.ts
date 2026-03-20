@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getDbConnection, sql } from '@/lib/db';
+import { getDbConnection } from '@/lib/db';
 
 /**
  * Health check endpoint to keep Azure SQL connection alive
@@ -7,9 +7,9 @@ import { getDbConnection, sql } from '@/lib/db';
 export async function GET() {
     try {
         const pool = await getDbConnection();
-        const result = await pool.request().query("SELECT 1 as status");
+        const result = await pool.query("SELECT 1 as status");
 
-        if (result.recordset[0].status !== 1) {
+        if (result.rows[0].status !== 1) {
             throw new Error("Database query failed");
         }
 

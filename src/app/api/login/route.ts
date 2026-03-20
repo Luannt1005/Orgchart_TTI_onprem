@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getDbConnection, sql } from "@/lib/db";
+import { getDbConnection } from "@/lib/db";
 import { verifyPassword } from "@/lib/password";
 import { encrypt } from "@/lib/auth";
 import { cookies } from "next/headers";
@@ -15,15 +15,13 @@ export async function POST(req: Request) {
         const pool = await getDbConnection();
 
         // Find user
-        const result = await pool.request()
-            .input('username', sql.NVarChar, username)
-            .query("SELECT * FROM users WHERE username = @username");
+        const result = await pool.query("SELECT * FROM users WHERE username = $1", [username]);
 
-        if (result.recordset.length === 0) {
+        if (result.rows.length === 0) {
             return NextResponse.json({ success: false, error: "Sai tài khoản hoặc mật khẩu" }, { status: 401 });
         }
 
-        const user = result.recordset[0];
+        const user = result.rows[0];
 
         // Verify password
         const isValid = await verifyPassword(password, user.password);

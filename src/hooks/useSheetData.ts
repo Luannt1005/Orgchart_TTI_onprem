@@ -34,8 +34,8 @@ function transformSheetData(rawData: any[]): OrgNode[] {
 
         return {
             ...row,
-            id: id ? String(id).trim() : `unknown-${Math.random()}`,
-            pid: pid ? String(pid).trim() : '',
+            id: id ? normalizeId(id) : `unknown-${Math.random()}`,
+            pid: pid ? normalizeId(pid) : '',
             name: name || 'Unknown',
             title: title || '',
             dept: dept || '',

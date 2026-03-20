@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getDbConnection, sql } from "@/lib/db";
+import { getDbConnection } from "@/lib/db";
 import { isAuthenticated, unauthorizedResponse } from "@/lib/auth-server";
 
 /**
@@ -12,12 +12,11 @@ export async function GET() {
     }
     try {
         const pool = await getDbConnection();
-        const result = await pool.request()
-            .query("SELECT id, username, full_name, role, created_at FROM users ORDER BY full_name ASC");
+        const result = await pool.query("SELECT id, username, full_name, role, created_at FROM users ORDER BY full_name ASC");
 
         return NextResponse.json({
             success: true,
-            data: result.recordset
+            data: result.rows
         });
     } catch (error: any) {
         console.error("API Fetch Users Error:", error);

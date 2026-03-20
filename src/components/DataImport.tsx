@@ -88,11 +88,8 @@ export default function DataImport({ mode = 'both' }: DataImportProps) {
 
         // Initial validation logs
         const initialLogs = newFiles.map(f => {
-            // Updated Regex: Match leading digits (ID) followed by optional anything else.
-            // Example: "612778 Nguyen Van A.jpg" -> match "612778"
-            // Example: "612778.jpg" -> match "612778"
-            // No leading zeros allowed for the ID part.
-            const match = f.name.match(/^([1-9]\d*)/);
+            // Updated Regex: Match all digits including leading zeros (e.g., 000818)
+            const match = f.name.match(/^(\d+)/);
             const isValidName = !!match;
 
             return {
@@ -100,7 +97,7 @@ export default function DataImport({ mode = 'both' }: DataImportProps) {
                 status: isValidName ? 'pending' as const : 'error' as const,
                 message: isValidName
                     ? `Ready (ID: ${match ? match[1] : ''})`
-                    : 'Invalid format. Name must start with Employee ID (no leading zeros).'
+                    : 'Invalid format. Name must start with Employee ID.'
             };
         });
 
@@ -111,7 +108,7 @@ export default function DataImport({ mode = 'both' }: DataImportProps) {
     const processAndUploadImage = async (file: File, index: number) => {
         return new Promise<void>(async (resolve) => {
             // Extract ID from filename again
-            const match = file.name.match(/^([1-9]\d*)/);
+            const match = file.name.match(/^(\d+)/);
 
             // Re-validate just in case
             if (!match) {
@@ -124,7 +121,8 @@ export default function DataImport({ mode = 'both' }: DataImportProps) {
                 return;
             }
 
-            const employeeId = match[1]; // e.g. "612778"
+            // Normalize ID: Remove leading zeros to match the API (e.g., "000818" -> "818")
+            const employeeId = match[1].replace(/^0+/, '') || '0';
 
             try {
                 // 1. Resize and Convert to WebP

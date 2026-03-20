@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabase";
 import { isAuthenticated, unauthorizedResponse, getCurrentUser } from "@/lib/auth-server";
+import { promises as fs } from "fs";
+import * as path from "path";
 
 export async function POST(req: Request) {
     if (!await isAuthenticated()) {
@@ -25,37 +26,26 @@ export async function POST(req: Request) {
         const arrayBuffer = await file.arrayBuffer();
         const buffer = new Uint8Array(arrayBuffer);
 
-        // Upload to Supabase Storage
-        // Bucket: "Mil VN Images"
-        // Path: "uploads/{filename}.webp"
-        const filePath = `uploads/${filename}.webp`;
-
-        const { data, error } = await supabaseAdmin.storage
-            .from("Mil VN Images")
-            .upload(filePath, buffer, {
-                contentType: "image/webp",
-                upsert: true, // Replace if exists
-                cacheControl: "3600"
-            });
-
-        if (error) {
-            console.error("Supabase Storage Error:", error);
-            return NextResponse.json(
-                { success: false, error: error.message },
-                { status: 500 }
-            );
+        // Ensure the directory exists
+        const uploadDir = path.join(process.cwd(), "public", "uploads");
+        try {
+            await fs.access(uploadDir);
+        } catch {
+            await fs.mkdir(uploadDir, { recursive: true });
         }
 
-        // Get public URL (optional, but good for confirmation)
-        const { data: { publicUrl } } = supabaseAdmin.storage
-            .from("Mil VN Images")
-            .getPublicUrl(filePath);
+        // Save file locally to public/uploads
+        const filePath = path.join(uploadDir, `${filename}.webp`);
+        await fs.writeFile(filePath, buffer);
+
+        // Calculate public URL
+        const publicUrl = `/uploads/${filename}.webp`;
 
         return NextResponse.json({
             success: true,
             message: "Image uploaded successfully",
             url: publicUrl,
-            path: filePath
+            path: publicUrl
         });
 
     } catch (error: any) {

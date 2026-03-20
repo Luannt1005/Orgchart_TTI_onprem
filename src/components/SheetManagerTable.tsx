@@ -125,7 +125,7 @@ const formatDate = (value: any): string => {
   }
 };
 
-const IMAGE_BASE_URL = "https://jugotvbkvknjcxrgyyfq.supabase.co/storage/v1/object/public/Mil%20VN%20Images/uploads/";
+const IMAGE_BASE_URL = "/uploads/";
 
 const getStatusColor = (value: string, type: string) => {
   const v = String(value).toLowerCase().trim();

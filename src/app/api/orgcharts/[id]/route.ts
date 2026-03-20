@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getDbConnection, sql } from '@/lib/db';
+import { getDbConnection } from '@/lib/db';
 
 /**
  * GET /api/orgcharts/[id]
@@ -21,11 +21,9 @@ export async function GET(
         }
 
         const pool = await getDbConnection();
-        const result = await pool.request()
-            .input('id', sql.UniqueIdentifier, id)
-            .query("SELECT * FROM custom_orgcharts WHERE id = @id");
+        const result = await pool.query("SELECT * FROM custom_orgcharts WHERE id = $1", [id]);
 
-        if (result.recordset.length === 0) {
+        if (result.rows.length === 0) {
             return NextResponse.json({
                 error: "Orgchart not found",
                 orgchart_id: id,
@@ -33,7 +31,7 @@ export async function GET(
             }, { status: 404 });
         }
 
-        const data = result.recordset[0];
+        const data = result.rows[0];
 
         return NextResponse.json({
             orgchart_id: data.id,
@@ -69,29 +67,29 @@ export async function PUT(
         const { org_data, orgchart_name, describe, is_public } = data;
 
         const pool = await getDbConnection();
-        const requestSql = pool.request();
-        requestSql.input('id', sql.UniqueIdentifier, id);
 
-        let setClauses = ["updated_at = SYSDATETIME()"];
+        let setClauses = ["updated_at = CURRENT_TIMESTAMP"];
+        let queryValues: any[] = [id];
+        let vIndex = 2;
 
         if (org_data !== undefined) {
-            requestSql.input('org_data', sql.NVarChar, JSON.stringify(org_data));
-            setClauses.push("org_data = @org_data");
+            queryValues.push(JSON.stringify(org_data));
+            setClauses.push(`org_data = $${vIndex++}`);
         }
         if (orgchart_name) {
-            requestSql.input('orgchart_name', sql.NVarChar, orgchart_name);
-            setClauses.push("orgchart_name = @orgchart_name");
+            queryValues.push(orgchart_name);
+            setClauses.push(`orgchart_name = $${vIndex++}`);
         }
         if (describe !== undefined) {
-            requestSql.input('description', sql.NVarChar, describe);
-            setClauses.push("description = @description");
+            queryValues.push(describe);
+            setClauses.push(`description = $${vIndex++}`);
         }
         if (is_public !== undefined) {
-            requestSql.input('is_public', sql.Bit, is_public ? 1 : 0);
-            setClauses.push("is_public = @is_public");
+            queryValues.push(is_public ? true : false);
+            setClauses.push(`is_public = $${vIndex++}`);
         }
 
-        await requestSql.query(`UPDATE custom_orgcharts SET ${setClauses.join(', ')} WHERE id = @id`);
+        await pool.query(`UPDATE custom_orgcharts SET ${setClauses.join(', ')} WHERE id = $1`, queryValues);
 
         return NextResponse.json({
             success: true,
@@ -118,9 +116,7 @@ export async function DELETE(
         const { id } = await params;
         const pool = await getDbConnection();
 
-        await pool.request()
-            .input('id', sql.UniqueIdentifier, id)
-            .query("DELETE FROM custom_orgcharts WHERE id = @id");
+        await pool.query("DELETE FROM custom_orgcharts WHERE id = $1", [id]);
 
         return NextResponse.json({
             success: true,

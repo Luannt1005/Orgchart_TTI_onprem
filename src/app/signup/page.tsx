@@ -30,23 +30,23 @@ export default function SignupPage() {
 
     // Validation
     if (!fullName || !username || !password || !confirmPassword) {
-      setError("Vui lòng nhập đầy đủ thông tin");
+      setError("Please enter all information");
       return;
     }
 
     // Email validation
     if (!username.endsWith('@ttigroup.com.vn')) {
-      setError("Email phải kết thúc bằng @ttigroup.com.vn");
+      setError("Email must end with @ttigroup.com.vn");
       return;
     }
 
     if (password !== confirmPassword) {
-      setError("Mật khẩu không trùng khớp");
+      setError("Passwords do not match");
       return;
     }
 
     if (password.length < 6) {
-      setError("Mật khẩu phải có ít nhất 6 ký tự");
+      setError("Password must be at least 6 characters");
       return;
     }
 
@@ -66,7 +66,7 @@ export default function SignupPage() {
       const data = await res.json();
 
       if (!data.success) {
-        throw new Error(data.error || "Không thể tạo tài khoản");
+        throw new Error(data.error || "Unable to create account");
       }
 
       // 4. Show success and redirect
@@ -77,7 +77,7 @@ export default function SignupPage() {
 
     } catch (err: any) {
       console.error("Signup error:", err);
-      setError(err.message || "Lỗi kết nối. Vui lòng thử lại.");
+      setError(err.message || "Connection error. Please try again.");
       setLoading(false);
     }
   };
@@ -88,8 +88,8 @@ export default function SignupPage() {
       <div className={styles['signup-container']}>
         <div className={styles['success-container']}>
           <div className={styles['success-icon']}>✓</div>
-          <h2>Tạo tài khoản thành công!</h2>
-          <p>Chuyển hướng đến trang đăng nhập...</p>
+          <h2>Account created successfully!</h2>
+          <p>Redirecting to login page...</p>
           <div className={styles['spinner-dots']}>
             <span></span>
             <span></span>
@@ -124,8 +124,8 @@ export default function SignupPage() {
 
         {/* Header */}
         <div className={styles['signup-header']}>
-          <h1>Tạo Tài Khoản</h1>
-          <p>Quản lý Sơ đồ Tổ chức</p>
+          <h1>Create Account</h1>
+          <p>Org Chart Management</p>
         </div>
 
         {/* Error Alert */}
@@ -140,12 +140,12 @@ export default function SignupPage() {
         <form onSubmit={handleSubmit} className={styles['signup-form']}>
           {/* Full Name */}
           <div className={styles['form-group']}>
-            <label htmlFor="fullName">Họ và tên</label>
+            <label htmlFor="fullName">Full Name</label>
             <div className={styles['input-wrapper']}>
               <input
                 id="fullName"
                 type="text"
-                placeholder="Nhập họ và tên"
+                placeholder="Enter full name"
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
                 disabled={loading}
@@ -163,7 +163,7 @@ export default function SignupPage() {
               <input
                 id="username"
                 type="text"
-                placeholder="Nhập email"
+                placeholder="Enter email"
                 value={username}
                 onChange={(e) => {
                   const val = e.target.value;
@@ -191,7 +191,7 @@ export default function SignupPage() {
                   }}
                   className={styles['email-suggestion']}
                 >
-                  <span>Gợi ý: <strong>{username}ttigroup.com.vn</strong></span>
+                  <span>Suggestion: <strong>{username}ttigroup.com.vn</strong></span>
                 </button>
               )}
             </div>
@@ -199,12 +199,12 @@ export default function SignupPage() {
 
           {/* Password */}
           <div className={styles['form-group']}>
-            <label htmlFor="password">Mật khẩu</label>
+            <label htmlFor="password">Password</label>
             <div className={styles['input-wrapper']}>
               <input
                 id="password"
                 type={showPassword ? "text" : "password"}
-                placeholder="Nhập mật khẩu (tối thiểu 6 ký tự)"
+                placeholder="Enter password (min 6 characters)"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 disabled={loading}
@@ -228,12 +228,12 @@ export default function SignupPage() {
 
           {/* Confirm Password */}
           <div className={styles['form-group']}>
-            <label htmlFor="confirmPassword">Xác nhận mật khẩu</label>
+            <label htmlFor="confirmPassword">Confirm Password</label>
             <div className={styles['input-wrapper']}>
               <input
                 id="confirmPassword"
                 type={showConfirmPassword ? "text" : "password"}
-                placeholder="Nhập lại mật khẩu"
+                placeholder="Re-enter password"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 disabled={loading}
@@ -260,11 +260,11 @@ export default function SignupPage() {
             {loading ? (
               <>
                 <span className={styles['button-spinner']}></span>
-                <span>Đang tạo...</span>
+                <span>Creating...</span>
               </>
             ) : (
               <>
-                <span>Tạo Tài Khoản</span>
+                <span>Create Account</span>
                 <span className={styles['button-arrow']}>→</span>
               </>
             )}
@@ -276,9 +276,9 @@ export default function SignupPage() {
 
         {/* Footer Links */}
         <div className={styles['signup-footer']}>
-          <span className={styles['footer-text']}>Đã có tài khoản?</span>
+          <span className={styles['footer-text']}>Already have an account?</span>
           <Link href="/login" className={styles['footer-link']}>
-            Đăng nhập
+            Log in
           </Link>
         </div>
       </div>

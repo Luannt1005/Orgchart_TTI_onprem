@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getDbConnection, sql } from '@/lib/db';
+import { getDbConnection } from '@/lib/db';
 
 /**
  * GET /api/orgcharts
@@ -15,11 +15,12 @@ export async function GET(request: Request) {
 
   try {
     const pool = await getDbConnection();
-    const result = await pool.request()
-      .input('username', sql.NVarChar, username)
-      .query("SELECT id, username, orgchart_name, description, org_data, is_public FROM custom_orgcharts WHERE username = @username OR is_public = 1");
+    const result = await pool.query(
+      "SELECT id, username, orgchart_name, description, org_data, is_public FROM custom_orgcharts WHERE username = $1 OR is_public = true",
+      [username]
+    );
 
-    const orgcharts = (result.recordset || []).map(doc => ({
+    const orgcharts = (result.rows || []).map(doc => ({
       orgchart_id: doc.id,
       orgchart_name: doc.orgchart_name,
       describe: doc.description,
@@ -55,19 +56,15 @@ export async function POST(request: Request) {
     }
 
     const pool = await getDbConnection();
-    const result = await pool.request()
-      .input('username', sql.NVarChar, username)
-      .input('orgchart_name', sql.NVarChar, orgchart_name)
-      .input('description', sql.NVarChar, describe || "")
-      .input('org_data', sql.NVarChar, JSON.stringify(org_data || { data: [] }))
-      .input('is_public', sql.Bit, is_public ? 1 : 0)
-      .query(`
+    const result = await pool.query(`
             INSERT INTO custom_orgcharts (username, orgchart_name, description, org_data, is_public)
-            OUTPUT INSERTED.id
-            VALUES (@username, @orgchart_name, @description, @org_data, @is_public)
-        `);
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id
+        `, [
+      username, orgchart_name, describe || "", JSON.stringify(org_data || { data: [] }), is_public ? true : false
+    ]);
 
-    const newOrgchartId = result.recordset[0].id;
+    const newOrgchartId = result.rows[0].id;
 
     return NextResponse.json({
       success: true,

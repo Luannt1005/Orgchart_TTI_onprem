@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getDbConnection, sql } from "@/lib/db";
+import { getDbConnection } from "@/lib/db";
 import { getCachedData, invalidateCachePrefix } from "@/lib/cache";
 
 import { retryOperation } from "@/lib/retry";
@@ -56,18 +56,16 @@ export async function GET(req: Request) {
 
     // ======= SINGLE EMPLOYEE FETCH =======
     if (id) {
-      const result = await pool.request()
-        .input('id', sql.UniqueIdentifier, id)
-        .query("SELECT * FROM employees WHERE id = @id");
+      const result = await pool.query("SELECT * FROM employees WHERE id = $1", [id]);
 
-      if (result.recordset.length === 0) {
+      if (result.rows.length === 0) {
         return NextResponse.json(
           { success: false, error: "Employee not found" },
           { status: 404 }
         );
       }
 
-      return NextResponse.json({ success: true, data: result.recordset[0] });
+      return NextResponse.json({ success: true, data: result.rows[0] });
     }
 
     // ======= PAGINATED FETCH =======
@@ -85,38 +83,37 @@ export async function GET(req: Request) {
 
       const hasFilters = Object.keys(filters).length > 0;
       let whereClause = "1=1";
-      const request = pool.request();
+      const queryValues: any[] = [];
 
-      Object.entries(filters).forEach(([key, value], index) => {
+      Object.entries(filters).forEach(([key, value]) => {
         const dbColumn = FILTER_MAPPING[key];
         if (dbColumn) {
-          const paramName = `param_${index}`;
           if (dbColumn === 'line_manager_status' || dbColumn === 'dl_idl_staff') {
-            whereClause += ` AND ${dbColumn} = @${paramName}`;
-            request.input(paramName, sql.NVarChar, value);
+            whereClause += ` AND ${dbColumn} = $${queryValues.length + 1}`;
+            queryValues.push(value);
           } else {
-            whereClause += ` AND ${dbColumn} LIKE @${paramName}`;
-            request.input(paramName, sql.NVarChar, `%${value}%`);
+            whereClause += ` AND ${dbColumn} LIKE $${queryValues.length + 1}`;
+            queryValues.push(`%${value}%`);
           }
         }
       });
 
       // Count query
-      const countResult = await request.query(`SELECT COUNT(*) as count FROM employees WHERE ${whereClause}`);
-      const totalCount = countResult.recordset[0].count;
+      const countResult = await pool.query(`SELECT COUNT(*) as count FROM employees WHERE ${whereClause}`, queryValues);
+      const totalCount = countResult.rows[0].count;
 
       // Data query with pagination
       const offset = (page - 1) * limit;
       // Note: ORDER BY is mandatory for OFFSET FETCH
-      const dataResult = await request.query(`
+      const dataResult = await pool.query(`
           SELECT ${LIST_COLUMNS} 
           FROM employees 
           WHERE ${whereClause} 
           ORDER BY full_name ASC 
-          OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY
-      `);
+          LIMIT ${limit} OFFSET ${offset}
+      `, queryValues);
 
-      const employees = dataResult.recordset;
+      const employees = dataResult.rows;
 
       // Transform to match expected format
       const transformedEmployees = (employees || []).map(emp => ({
@@ -168,8 +165,8 @@ export async function GET(req: Request) {
       async () => {
         console.log("📡 Fetching all employees for dashboard...");
 
-        const result = await pool.request().query(`SELECT ${LIST_COLUMNS} FROM employees ORDER BY full_name ASC`);
-        const employees = result.recordset;
+        const result = await pool.query(`SELECT ${LIST_COLUMNS} FROM employees ORDER BY full_name ASC`);
+        const employees = result.rows;
 
         // Transform
         const transformedEmployees = (employees || []).map(emp => ({
@@ -257,42 +254,40 @@ export async function POST(req: Request) {
       const timestamp = Date.now();
       let insertedCount = 0;
 
-      const transaction = new sql.Transaction(pool);
-      await transaction.begin();
+      const client = await pool.connect();
+      await client.query('BEGIN');
 
       try {
         for (let i = 0; i < quantity; i++) {
           const empId = `HC-${timestamp}-${i + 1}`;
-          // Use request from transaction
-          await transaction.request()
-            .input('emp_id', sql.NVarChar, empId)
-            .input('full_name', sql.NVarChar, data["FullName "] || data["FullName"] || "Vacant Position")
-            .input('job_title', sql.NVarChar, data["Job Title"] || null)
-            .input('dept', sql.NVarChar, data["Dept"] || null)
-            .input('bu', sql.NVarChar, data["BU"] || null)
-            .input('bu_org_3', sql.NVarChar, data["BU Org 3"] || null)
-            .input('dl_idl_staff', sql.NVarChar, data["DL/IDL/Staff"] || null)
-            .input('location', sql.NVarChar, data["Location"] || null)
-            // .input('employee_type', sql.NVarChar, 'hc_open') // Defined below
-            .input('line_manager', sql.NVarChar, data["Line Manager"] || null)
-            .input('is_direct', sql.NVarChar, data["Is Direct"] || "YES")
-            .input('joining_date', sql.NVarChar, data["Joining\r\n Date"] || data["Joining Date"] || null)
-            .input('last_working_day', sql.NVarChar, data["Last Working\r\nDay"] || data["Last Working Day"] || null)
-            .query(`
+          await client.query(`
                     INSERT INTO employees (
                         emp_id, full_name, job_title, dept, bu, dl_idl_staff, location, employee_type, 
                         line_manager, is_direct, joining_date
                     ) VALUES (
-                        @emp_id, @full_name, @job_title, @dept, @bu, @dl_idl_staff, @location, 'hc_open',
-                        @line_manager, @is_direct, @joining_date
+                        $1, $2, $3, $4, $5, $6, $7, 'hc_open',
+                        $8, $9, $10
                     )
-                `);
+                `, [
+            empId,
+            data["FullName "] || data["FullName"] || "Vacant Position",
+            data["Job Title"] || null,
+            data["Dept"] || null,
+            data["BU"] || null,
+            data["DL/IDL/Staff"] || null,
+            data["Location"] || null,
+            data["Line Manager"] || null,
+            data["Is Direct"] || "YES",
+            data["Joining\r\n Date"] || data["Joining Date"] || null
+          ]);
           insertedCount++;
         }
-        await transaction.commit();
+        await client.query('COMMIT');
       } catch (err: any) {
-        await transaction.rollback();
+        await client.query('ROLLBACK');
         throw err;
+      } finally {
+        client.release();
       }
 
       invalidateCachePrefix('employees');
@@ -308,29 +303,29 @@ export async function POST(req: Request) {
     if (action === "add") {
       const emp_id = data["Emp ID"] || `EMP-${Date.now()}`;
 
-      const result = await pool.request()
-        .input('emp_id', sql.NVarChar, emp_id)
-        .input('full_name', sql.NVarChar, data["FullName "] || data["FullName"] || null)
-        .input('job_title', sql.NVarChar, data["Job Title"] || null)
-        .input('dept', sql.NVarChar, data["Dept"] || null)
-        .input('bu', sql.NVarChar, data["BU"] || null)
-        .input('dl_idl_staff', sql.NVarChar, data["DL/IDL/Staff"] || null)
-        .input('location', sql.NVarChar, data["Location"] || null)
-        .input('employee_type', sql.NVarChar, data["Employee Type"] || null)
-        .input('line_manager', sql.NVarChar, data["Line Manager"] || null)
-        .input('is_direct', sql.NVarChar, data["Is Direct"] || "YES")
-        .input('joining_date', sql.NVarChar, data["Joining\r\n Date"] || data["Joining Date"] || null)
-        .query(`
+      const result = await pool.query(`
             INSERT INTO employees (
                 emp_id, full_name, job_title, dept, bu, dl_idl_staff, location, employee_type,
                 line_manager, is_direct, joining_date
-            ) OUTPUT INSERTED.id VALUES (
-                @emp_id, @full_name, @job_title, @dept, @bu, @dl_idl_staff, @location, @employee_type,
-                @line_manager, @is_direct, @joining_date
-            )
-        `);
+            ) VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8,
+                $9, $10, $11
+            ) RETURNING id
+        `, [
+        emp_id,
+        data["FullName "] || data["FullName"] || null,
+        data["Job Title"] || null,
+        data["Dept"] || null,
+        data["BU"] || null,
+        data["DL/IDL/Staff"] || null,
+        data["Location"] || null,
+        data["Employee Type"] || null,
+        data["Line Manager"] || null,
+        data["Is Direct"] || "YES",
+        data["Joining\r\n Date"] || data["Joining Date"] || null
+      ]);
 
-      const insertedId = result.recordset[0]?.id;
+      const insertedId = result.rows[0]?.id;
       invalidateCachePrefix('employees');
       invalidateCachePrefix('orgchart');
 
@@ -343,13 +338,13 @@ export async function POST(req: Request) {
 
     // Reject all pending approval requests
     if (action === "rejectAll") {
-      const result = await pool.request().query(`
+      const result = await pool.query(`
             UPDATE employees 
             SET line_manager_status = 'rejected', pending_line_manager = NULL, requester = NULL
             WHERE line_manager_status = 'pending'
         `);
 
-      const count = result.rowsAffected[0];
+      const count = result.rowCount;
 
       invalidateCachePrefix('employees');
       invalidateCachePrefix('orgchart');
@@ -366,7 +361,7 @@ export async function POST(req: Request) {
     // Approve all pending approval requests
     if (action === "approveAll") {
       // We need to update line_manager to pending_line_manager value
-      const result = await pool.request().query(`
+      const result = await pool.query(`
           UPDATE employees
           SET line_manager = pending_line_manager,
               line_manager_status = 'approved',
@@ -375,7 +370,7 @@ export async function POST(req: Request) {
           WHERE line_manager_status = 'pending'
       `);
 
-      const count = result.rowsAffected[0];
+      const count = result.rowCount;
 
       invalidateCachePrefix('employees');
       invalidateCachePrefix('orgchart');
@@ -425,72 +420,71 @@ export async function PUT(req: Request) {
       );
     }
 
-    const request = pool.request();
-    request.input('id', sql.UniqueIdentifier, id); // Assuming ID is GUID
-
     let setClauses = [];
+    let queryValues: any[] = [id];
+    let vIndex = 2; // since $1 is id
 
     // Map data fields to columns
     if (data["Emp ID"]) {
-      request.input('emp_id', sql.NVarChar, data["Emp ID"]);
-      setClauses.push("emp_id = @emp_id");
+      queryValues.push(data["Emp ID"]);
+      setClauses.push(`emp_id = $${vIndex++}`);
     }
     if (data["FullName "] || data["FullName"]) {
-      request.input('full_name', sql.NVarChar, data["FullName "] || data["FullName"]);
-      setClauses.push("full_name = @full_name");
+      queryValues.push(data["FullName "] || data["FullName"]);
+      setClauses.push(`full_name = $${vIndex++}`);
     }
     if (data["Job Title"]) {
-      request.input('job_title', sql.NVarChar, data["Job Title"]);
-      setClauses.push("job_title = @job_title");
+      queryValues.push(data["Job Title"]);
+      setClauses.push(`job_title = $${vIndex++}`);
     }
     if (data["Dept"]) {
-      request.input('dept', sql.NVarChar, data["Dept"]);
-      setClauses.push("dept = @dept");
+      queryValues.push(data["Dept"]);
+      setClauses.push(`dept = $${vIndex++}`);
     }
     if (data["BU"]) {
-      request.input('bu', sql.NVarChar, data["BU"]);
-      setClauses.push("bu = @bu");
+      queryValues.push(data["BU"]);
+      setClauses.push(`bu = $${vIndex++}`);
     }
     if (data["DL/IDL/Staff"]) {
-      request.input('dl_idl_staff', sql.NVarChar, data["DL/IDL/Staff"]);
-      setClauses.push("dl_idl_staff = @dl_idl_staff");
+      queryValues.push(data["DL/IDL/Staff"]);
+      setClauses.push(`dl_idl_staff = $${vIndex++}`);
     }
     if (data["Location"]) {
-      request.input('location', sql.NVarChar, data["Location"]);
-      setClauses.push("location = @location");
+      queryValues.push(data["Location"]);
+      setClauses.push(`location = $${vIndex++}`);
     }
     if (data["Employee Type"]) {
-      request.input('employee_type', sql.NVarChar, data["Employee Type"]);
-      setClauses.push("employee_type = @employee_type");
+      queryValues.push(data["Employee Type"]);
+      setClauses.push(`employee_type = $${vIndex++}`);
     }
     if (data["Line Manager"]) {
-      request.input('line_manager', sql.NVarChar, data["Line Manager"]);
-      setClauses.push("line_manager = @line_manager");
+      queryValues.push(data["Line Manager"]);
+      setClauses.push(`line_manager = $${vIndex++}`);
     }
     if (data["Is Direct"]) {
-      request.input('is_direct', sql.NVarChar, data["Is Direct"]);
-      setClauses.push("is_direct = @is_direct");
+      queryValues.push(data["Is Direct"]);
+      setClauses.push(`is_direct = $${vIndex++}`);
     }
     if (data["Joining\r\n Date"] || data["Joining Date"]) {
-      request.input('joining_date', sql.NVarChar, data["Joining\r\n Date"] || data["Joining Date"]);
-      setClauses.push("joining_date = @joining_date");
+      queryValues.push(data["Joining\r\n Date"] || data["Joining Date"]);
+      setClauses.push(`joining_date = $${vIndex++}`);
     }
 
     if (data["lineManagerStatus"] !== undefined) {
-      request.input('line_manager_status', sql.NVarChar, data["lineManagerStatus"]);
-      setClauses.push("line_manager_status = @line_manager_status");
+      queryValues.push(data["lineManagerStatus"]);
+      setClauses.push(`line_manager_status = $${vIndex++}`);
     }
     if (data["pendingLineManager"] !== undefined) {
-      request.input('pending_line_manager', sql.NVarChar, data["pendingLineManager"]);
-      setClauses.push("pending_line_manager = @pending_line_manager");
+      queryValues.push(data["pendingLineManager"]);
+      setClauses.push(`pending_line_manager = $${vIndex++}`);
     }
     if (data["requester"] !== undefined) {
-      request.input('requester', sql.NVarChar, data["requester"]);
-      setClauses.push("requester = @requester");
+      queryValues.push(data["requester"]);
+      setClauses.push(`requester = $${vIndex++}`);
     }
 
     if (setClauses.length > 0) {
-      await request.query(`UPDATE employees SET ${setClauses.join(', ')} WHERE id = @id`);
+      await pool.query(`UPDATE employees SET ${setClauses.join(', ')} WHERE id = $1`, queryValues);
     }
 
     invalidateCachePrefix('employees');
@@ -531,8 +525,8 @@ export async function DELETE(req: Request) {
       // Only delete if we need to? Or just truncate? 
       // Note: TRUNCATE is faster but might require more perms or break FKs if any. 
       // Using delete with always true.
-      const result = await pool.request().query("DELETE FROM employees");
-      const count = result.rowsAffected[0];
+      const result = await pool.query("DELETE FROM employees");
+      const count = result.rowCount;
 
       invalidateCachePrefix('employees');
       invalidateCachePrefix('orgchart');
@@ -552,9 +546,7 @@ export async function DELETE(req: Request) {
       );
     }
 
-    await pool.request()
-      .input('id', sql.UniqueIdentifier, id)
-      .query("DELETE FROM employees WHERE id = @id");
+    await pool.query("DELETE FROM employees WHERE id = $1", [id]);
 
     invalidateCachePrefix('employees');
     invalidateCachePrefix('orgchart');

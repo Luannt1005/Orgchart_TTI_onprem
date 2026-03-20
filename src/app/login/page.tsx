@@ -37,7 +37,7 @@ export default function LoginPage() {
       const data = await res.json();
 
       if (!data.success) {
-        throw new Error(data.error || "Đăng nhập thất bại");
+        throw new Error(data.error || "Login failed");
       }
 
       // 6. Save user info to context for UI
@@ -53,7 +53,7 @@ export default function LoginPage() {
 
     } catch (err: any) {
       console.error("Login error:", err);
-      setError(err.message || "Lỗi kết nối. Vui lòng thử lại.");
+      setError(err.message || "Connection error. Please try again.");
       setLoading(false);
     }
   };
@@ -64,8 +64,8 @@ export default function LoginPage() {
       <div className={styles['login-container']}>
         <div className={styles['success-container']}>
           <div className={styles['success-icon']}>✓</div>
-          <h2>Đăng nhập thành công!</h2>
-          <p>Chào mừng quay lại</p>
+          <h2>Login successful!</h2>
+          <p>Welcome back</p>
           <div className={styles['spinner-dots']}>
             <span></span>
             <span></span>
@@ -96,8 +96,8 @@ export default function LoginPage() {
 
         {/* Header */}
         <div className={styles['login-header']}>
-          <h1>Đăng Nhập</h1>
-          <p>Quản lý Sơ đồ Tổ chức</p>
+          <h1>Login</h1>
+          <p>Org Chart Management</p>
         </div>
 
         {/* Error Alert */}
@@ -117,7 +117,7 @@ export default function LoginPage() {
               <input
                 id="username"
                 type="text"
-                placeholder="Nhập email"
+                placeholder="Enter email"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 disabled={loading}
@@ -132,12 +132,12 @@ export default function LoginPage() {
 
           {/* Password Input */}
           <div className={styles['form-group']}>
-            <label htmlFor="password">Mật khẩu</label>
+            <label htmlFor="password">Password</label>
             <div className={styles['input-wrapper']}>
               <input
                 id="password"
                 type={showPassword ? "text" : "password"}
-                placeholder="Nhập mật khẩu"
+                placeholder="Enter password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 disabled={loading}
@@ -164,11 +164,11 @@ export default function LoginPage() {
             {loading ? (
               <>
                 <span className={styles['button-spinner']}></span>
-                <span>Đang kiểm tra...</span>
+                <span>Authenticating...</span>
               </>
             ) : (
               <>
-                <span>Đăng Nhập</span>
+                <span>Login</span>
                 <span className={styles['button-arrow']}>→</span>
               </>
             )}
@@ -181,10 +181,10 @@ export default function LoginPage() {
         {/* Footer Links */}
         <div className={styles['login-footer']}>
           <a href="#forgot" className={styles['footer-link']}>
-            Quên mật khẩu?
+            Forgot password?
           </a>
           <a href="/signup" className={styles['footer-link']}>
-            Tạo tài khoản
+            Create account
           </a>
         </div>
       </div>

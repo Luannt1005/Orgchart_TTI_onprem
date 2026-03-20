@@ -1,6 +1,7 @@
 
 import { NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabase";
+import { promises as fs } from "fs";
+import * as path from "path";
 
 export async function POST(req: Request) {
     try {
@@ -19,31 +20,22 @@ export async function POST(req: Request) {
         const arrayBuffer = await file.arrayBuffer();
         const buffer = new Uint8Array(arrayBuffer);
 
-        // Upload to Supabase Storage
-        // Bucket: "Mil VN Images"
-        // Filename should already be normalized clientside (e.g. 818.webp)
-        // We upload to the root of the bucket as requested.
-
-        const { data, error } = await supabaseAdmin.storage
-            .from("Mil VN Images")
-            .upload(`uploads/${filename}`, buffer, {
-                contentType: "image/webp",
-                upsert: true, // Replace if exists
-                cacheControl: "3600"
-            });
-
-        if (error) {
-            console.error("Supabase Admin Storage Error:", error);
-            return NextResponse.json(
-                { success: false, error: error.message },
-                { status: 500 }
-            );
+        // Ensure the directory exists
+        const uploadDir = path.join(process.cwd(), "public", "uploads");
+        try {
+            await fs.access(uploadDir);
+        } catch {
+            await fs.mkdir(uploadDir, { recursive: true });
         }
+
+        // Save file locally to public/uploads
+        const filePath = path.join(uploadDir, filename);
+        await fs.writeFile(filePath, buffer);
 
         return NextResponse.json({
             success: true,
             message: "Uploaded successfully",
-            path: data.path
+            path: `/uploads/${filename}`
         });
 
     } catch (error: any) {

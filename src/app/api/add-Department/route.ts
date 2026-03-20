@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getDbConnection, sql } from "@/lib/db";
+import { getDbConnection } from "@/lib/db";
 
 /**
  * POST /api/add-Department
@@ -51,40 +51,25 @@ export async function POST(req: Request) {
     const pool = await getDbConnection();
 
     // Check if exists
-    const check = await pool.request()
-      .input('id', sql.NVarChar, departmentId)
-      .query("SELECT id FROM orgchart_nodes WHERE id = @id");
+    const check = await pool.query("SELECT id FROM orgchart_nodes WHERE id = $1", [departmentId]);
 
-    if (check.recordset.length > 0) {
+    if (check.rows.length > 0) {
       // Update
-      await pool.request()
-        .input('id', sql.NVarChar, departmentData.id)
-        .input('pid', sql.NVarChar, departmentData.pid)
-        .input('name', sql.NVarChar, departmentData.name)
-        .input('description', sql.NVarChar, departmentData.description)
-        // Update other fields if needed, simplified for department node logic
-        .query(`
+      await pool.query(`
                 UPDATE orgchart_nodes 
-                SET pid = @pid, name = @name, description = @description, updated_at = SYSDATETIME()
-                WHERE id = @id
-            `);
+                SET pid = $2, name = $3, description = $4, updated_at = CURRENT_TIMESTAMP
+                WHERE id = $1
+            `, [departmentData.id, departmentData.pid, departmentData.name, departmentData.description]);
     } else {
       // Insert
-      await pool.request()
-        .input('id', sql.NVarChar, departmentData.id)
-        .input('pid', sql.NVarChar, departmentData.pid)
-        .input('stpid', sql.NVarChar, departmentData.stpid)
-        .input('name', sql.NVarChar, departmentData.name)
-        .input('title', sql.NVarChar, departmentData.title)
-        .input('tags', sql.NVarChar, departmentData.tags)
-        .input('orig_pid', sql.NVarChar, departmentData.orig_pid)
-        .input('dept', sql.NVarChar, departmentData.dept)
-        .input('type', sql.NVarChar, departmentData.type)
-        .input('description', sql.NVarChar, departmentData.description)
-        .query(`
+      await pool.query(`
                 INSERT INTO orgchart_nodes (id, pid, stpid, name, title, tags, orig_pid, dept, type, description)
-                VALUES (@id, @pid, @stpid, @name, @title, @tags, @orig_pid, @dept, @type, @description)
-            `);
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            `, [
+        departmentData.id, departmentData.pid, departmentData.stpid, departmentData.name,
+        departmentData.title, departmentData.tags, departmentData.orig_pid, departmentData.dept,
+        departmentData.type, departmentData.description
+      ]);
     }
 
     console.log("Department added successfully:", departmentId);

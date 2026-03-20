@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { decrypt } from "@/lib/auth";
-import { getDbConnection, sql } from "@/lib/db";
+import { getDbConnection } from "@/lib/db";
 
 export async function GET() {
     try {
@@ -15,13 +15,11 @@ export async function GET() {
         const userId = payload.user.id;
         const pool = await getDbConnection();
 
-        const result = await pool.request()
-            .input('id', sql.UniqueIdentifier, userId)
-            .query("SELECT id, username, full_name, role FROM users WHERE id = @id"); // Removed employee_id, title if not in schema
+        const result = await pool.query("SELECT id, username, full_name, role FROM users WHERE id = $1", [userId]);
 
-        if (result.recordset.length === 0) throw new Error("User not found");
+        if (result.rows.length === 0) throw new Error("User not found");
 
-        return NextResponse.json({ success: true, data: result.recordset[0] });
+        return NextResponse.json({ success: true, data: result.rows[0] });
     } catch (error: any) {
         console.error("Profile GET Error:", error);
         return NextResponse.json({ success: false, message: error.message }, { status: 500 });
@@ -47,11 +45,10 @@ export async function PUT(req: Request) {
         // So I will only update full_name for now.
 
         const pool = await getDbConnection();
-        const request = pool.request()
-            .input('id', sql.UniqueIdentifier, userId)
-            .input('full_name', sql.NVarChar, body.full_name);
-
-        await request.query("UPDATE users SET full_name = @full_name, updated_at = SYSDATETIME() WHERE id = @id");
+        await pool.query(
+            "UPDATE users SET full_name = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2",
+            [body.full_name, userId]
+        );
 
         return NextResponse.json({ success: true, data: { full_name: body.full_name } });
     } catch (error: any) {

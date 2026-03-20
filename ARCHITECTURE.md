@@ -1,82 +1,92 @@
 # System Architecture
 
 ## Overview
-This document outlines the current system architecture for the OrgChart application. The system has migrated from a Supabase-centric backend to a custom implementation using **Azure SQL** for the core database and authentication, while retaining **Supabase Storage** for object storage (images).
+This document outlines the current system architecture for the OrgChart application. The system has migrated from a cloud-based infrastructure (Azure SQL & Supabase) to a fully **on-premises / local** setup using **PostgreSQL** for data management and the **Local File System** for image storage.
 
 ## Architecture Diagram
 
 ```mermaid
 graph TD
-    User((User/Admin)) -->|HTTPS| UI[UI Shell / Next.js Client]
+    User(("👤 User / Admin")) -->|HTTP/HTTPS| UI[Next.js Client (React)]
     
-    subgraph Client [Client Application (Next.js)]
-        UI --> AuthGuard[Auth Guard / Middleware]
-        AuthGuard --> Modules
-        subgraph Modules
-            OC[Org Chart Module]
-            Dash[Dashboard Module]
-            Sheet[Sheet Data Module]
-        end
-        Modules -->|SWR / Fetch| DataLayer[Data Access Layer]
-    end
-
-    subgraph API [Next.js Server API]
-        DataLayer -->|JSON| APIRoutes[API Routes]
-        APIRoutes --> Logic[Business Logic Layer]
+    subgraph "Next.js Application (Port 3000)"
+        UI --> MW[Edge Middleware / Auth]
+        MW --> API[API Routes (/api/*)]
         
-        subgraph Logic
-            AuthMid[Auth Middleware <br/>(Custom JWT Cookie)]
-            Transformer[Data Transformer]
-            Cache[Memory Cache]
+        subgraph "Internal Services"
+            AuthService["🔐 Auth Service (JWT)"]
+            CacheService["⚡ Memory Cache"]
+            Transformer["⚙️ Data Transformer"]
         end
         
-        Logic -->|SQL Query| DB_Client[Azure SQL Client (mssql)]
-        Logic -->|Upload/Read| Storage_Client[Supabase Client (Storage Only)]
+        subgraph "Local Storage"
+            FS[("📁 public/uploads<br/>(Local Images)")]
+        end
     end
 
-    subgraph Backend [Infrastructure]
-        DB_Client -->|Read/Write| AzureDB[(Azure SQL Database)]
-        Storage_Client -->|Store/Retrieve| SupabaseStorage[Supabase Object Storage <br/>(Images/Avatars)]
-    end
+    API --> AuthService
+    API --> CacheService
+    API --> Transformer
     
-    AzureDB -.->|Authentication Data| AuthMid
-    SupabaseStorage -.->|Serve Images| UI
+    subgraph "Data Tier"
+        PostgresDB[("🛢️ PostgreSQL Database<br/>(Local On-Premises)")]
+    end
+
+    API -->|pg client| PostgresDB
+    API -->|fs.write| FS
+    UI -.->|Static Fetch| FS
+    
+    PostgresDB -.->|Auth Data| AuthService
 ```
+
+## System Connectivity & Services
+
+The following table maps the various components, services, and protocols used across the application.
+
+| Application / Component | Service Type | Protocol | Port | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| **Next.js Web App** | Web Server | HTTP / HTTPS | 3000 | Main application logic and UI shell |
+| **PostgreSQL** | Database | TCP/IP | 5432 | Primary data storage (employees, users, configs) |
+| **File System** | Local Storage | File IO (fs) | N/A | Storage for profile images in `public/uploads` |
+| **JWT Service** | Authentication | JSON Web Token | Stateless | Session management via HttpOnly cookies |
+| **Memory Cache** | Key-Value Store | In-process Map | N/A | 15-minute TTL cache for API responses |
 
 ## Key Components
 
 ### 1. Client (Next.js Frontend)
-- **Framework**: Next.js App Router.
-- **UI Components**: Built with React, Tailwind CSS.
-- **State Management**: SWR for data fetching and caching.
-- **Authentication**: Cookie-based authentication using custom JWTs.
+- **Framework**: Next.js 15+ (App Router).
+- **Communication**: Communicates with Backend via standard HTTP/Fetch calls using the **SWR** library for data synchronization.
+- **Port**: Typically runs on **Port 3000** during development.
 
 ### 2. API Layer (Next.js Server)
-- **API Routes**: Handle all client requests (`/api/*`).
-- **Auth Middleware**: Verifies the `auth` cookie containing the JWT. Validates user sessions against the **Azure SQL** database (`users` table) if needed, or verifies the signed token.
-- **Data Access**: Uses `mssql` library to communicate with Azure SQL.
-- **Data Transformation**: Converts raw SQL recordsets into hierarchical structures (e.g., for Org Chart).
+- **API Routes**: Handle application logic (`/api/orgchart`, `/api/sheet`, etc.).
+- **Authentication**: Custom JWT-based security. Tokens are stored in secure, HttpOnly cookies.
+- **Data Access**: Uses the `pg` (node-postgres) driver to connect to the local database.
 
-### 3. Backend Services
-- **Azure SQL Database**: The primary source of truth.
-  - Stores: `Employees`, `Users`, `Departments`, `OrgChart Configs`.
-  - Replaces the previous Supabase Database.
-- **Supabase Storage**:
-  - Stores: Employee profile images and avatars.
-  - Accessed via public URLs or signed URLs.
-  - **Note**: This is the *only* Supabase service currently in use.
+### 3. Backend Services (Local Infrastructure)
+- **PostgreSQL Database**:
+  - **Host**: `localhost` (default)
+  - **Port**: `5432`
+  - **Scope**: Manages all relational data including employee profiles and user credentials.
+- **Local Storage**:
+  - **Path**: `src/public/uploads`
+  - **Scope**: Serves employee avatars and chart assets directly through Next.js static file serving.
 
-## Data Flow Changes
+## Data Flow Summary
 
-| Feature | Old Architecture (Supabase) | Current Architecture (Azure) |
+| Feature | Protocol | Destination |
 | :--- | :--- | :--- |
-| **Database** | Supabase (PostgreSQL) | **Azure SQL Database** |
-| **Auth** | Supabase Auth | **Custom JWT + Azure SQL** |
-| **API Logic** | Supabase Client (Client-side & Server-side) | **Next.js API Routes + mssql** |
-| **Storage** | Supabase Storage | **Supabase Storage** (Unchanged) |
+| **Data Fetching** | REST / JSON | `/api/*` |
+| **Database Query** | SQL (Postgres) | `localhost:5432` |
+| **Image Upload** | Multipart/FormData | `fs.writeFile` |
+| **Authentication** | JWT / Cookies | Header/Cookie based |
 
 ## Authentication Flow
-1. **Login**: Client sends params to `/api/login`.
-2. **Verification**: API checks credentials against `users` table in Azure SQL.
-3. **Session**: On success, API signs a JWT and sets an HttpOnly `auth` cookie.
-4. **Protection**: Middleware checks this cookie for protected routes.
+1. **Login**: POST credentials to `/api/login`.
+2. **Verification**: Backend checks password hash against PostgreSQL `users` table.
+3. **Session**: On success, a JWT is signed and issued as an HttpOnly `auth` cookie.
+4. **Validation**: API routes use `isAuthenticated()` helper to verify the JWT on every request.
+
+---
+**Version**: 2.0 (On-Premises Architecture)  
+**Updated**: 2026-02-25

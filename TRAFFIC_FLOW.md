@@ -30,10 +30,13 @@ graph TD
             CacheService["⚡ Memory Cache"]
             Transform["⚙️ Data Transformer"]
         end
+        
+        subgraph "Local Storage"
+            LocalFiles[("📁 public/uploads<br/>(Local Images)")]
+        end
     end
 
-    AzureDB[("🛢️ Azure SQL Database<br/>(Primary Data)")]
-    Supabase[("☁️ Supabase Storage<br/>(Public Images)")]
+    PostgresDB[("🛢️ PostgreSQL Database<br/>(Local On-Premises)")]
 
     %% Flows
     User -->|HTTPS Request| MW
@@ -55,7 +58,7 @@ graph TD
     API_Routes -.-> UploadAPI
     
     %% Services Logic
-    LoginAPI -->|Verify Creds| AzureDB
+    LoginAPI -->|Verify Creds| PostgresDB
     LoginAPI -->|Issue JWT| User
     
     OrgAPI --> AuthService
@@ -64,18 +67,18 @@ graph TD
     CacheService -- "Hit" --> OrgAPI
     CacheService -- "Miss" --> QueryDB["🔍 Query Employees"]
     
-    QueryDB --> AzureDB
-    AzureDB -->|Raw Rows| Transform
+    QueryDB --> PostgresDB
+    PostgresDB -->|Raw Rows| Transform
     Transform -->|Formatted JSON| CacheService
     
     %% Image Traffic
     Transform -.->|Gen URL| User
-    User -.->|Direct Image Fetch| Supabase
+    User -.->|Direct Image Fetch| LocalFiles
     
     %% Write Operations
-    SheetAPI -->|Update| AzureDB
-    ImportAPI -->|Bulk Insert| AzureDB
-    UploadAPI -->|Upload File| Supabase
+    SheetAPI -->|Update| PostgresDB
+    ImportAPI -->|Bulk Insert| PostgresDB
+    UploadAPI -->|FS Write| LocalFiles
 ```
 
 ## 2. Detailed Request Sequences
@@ -92,9 +95,9 @@ sequenceDiagram
     participant Middleware
     participant Page as Next.js Page
     participant API as /api/orgchart
-    participant DB as Azure SQL
+    participant DB as PostgreSQL
     participant Cache as Memory Cache
-    participant Supabase as Supabase Storage
+    participant FS as Local File System
 
     User->>Browser: Navigate to /org-chart
     Browser->>Middleware: GET /org-chart (Cookie: auth=JWT)
@@ -120,17 +123,17 @@ sequenceDiagram
         API->>DB: SELECT * FROM employees
         DB-->>API: Return Recordset
         API->>API: Transform Data (Tree Structure)
-        API->>API: Generate Image URLs
+        API->>API: Generate Image URLs (/uploads/...)
         API->>Cache: Store for 15mins
     end
     
-    API-->>Browser: Return JSON (300ms-1s)
+    API-->>Browser: Return JSON (100ms-300ms)
     
     Browser->>Browser: Render Chart Nodes
     
     par Load Images
-        Browser->>Supabase: GET /storage/v1/object/public/.../ID.webp
-        Supabase-->>Browser: Return Image File
+        Browser->>FS: GET /uploads/ID.webp
+        FS-->>Browser: Return Image File
     end
     deactivate Browser
 ```
@@ -143,12 +146,12 @@ sequenceDiagram
     actor User
     participant LoginUI as Login Page
     participant API as /api/login
-    participant DB as Azure SQL
+    participant DB as PostgreSQL
 
     User->>LoginUI: Enter Username/Pass
     LoginUI->>API: POST {username, password}
     
-    API->>DB: SELECT * FROM users WHERE username=@u
+    API->>DB: SELECT * FROM users WHERE username=$1
     DB-->>API: Returns User Row + Hash
     
     API->>API: bcrypt.compare(password, hash)
@@ -172,7 +175,7 @@ sequenceDiagram
     participant UI as Sheet Editor UI
     participant API as /api/sheet [PUT]
     participant AuthService as Auth Service
-    participant DB as Azure SQL
+    participant DB as PostgreSQL
     participant Cache as Memory Cache
 
     User->>UI: Click Edit, Modify Fields
@@ -184,8 +187,8 @@ sequenceDiagram
         API-->>UI: 401 Unauthorized
     else Authorized
         API->>API: Build Dynamic SET clause
-        API->>DB: UPDATE employees SET ... WHERE id=@id
-        DB-->>API: Success (rowsAffected)
+        API->>DB: UPDATE employees SET ... WHERE id=$1
+        DB-->>API: Success (rowCount)
         
         API->>Cache: Invalidate 'employees*'
         API->>Cache: Invalidate 'orgchart*'
@@ -205,7 +208,7 @@ sequenceDiagram
     participant UI as Import UI
     participant API as /api/import_excel
     participant XLSX as xlsx Library
-    participant DB as Azure SQL
+    participant DB as PostgreSQL
     participant Cache as Memory Cache
 
     Admin->>UI: Select Excel File, Click Upload
@@ -218,7 +221,7 @@ sequenceDiagram
     API->>XLSX: sheet_to_json()
     XLSX-->>API: Array of Rows (JSON)
     
-    API->>DB: BEGIN TRANSACTION
+    API->>DB: BEGIN
     API->>DB: SELECT id, emp_id FROM employees
     DB-->>API: Existing Employee IDs Map
     
@@ -227,17 +230,17 @@ sequenceDiagram
     loop For Each Row
         API->>API: Parse Row Fields
         alt Employee Exists (Emp ID Match)
-            API->>DB: UPDATE employees SET ... WHERE id=@id
+            API->>DB: UPDATE employees SET ... WHERE id=$1
         else New Employee
             API->>DB: INSERT INTO employees (...)
         end
     end
     
     alt Employees Removed from File
-        API->>DB: DELETE FROM employees WHERE id IN (...)
+        API->>DB: DELETE FROM employees WHERE id = ANY($1)
     end
     
-    API->>DB: COMMIT TRANSACTION
+    API->>DB: COMMIT
     API->>Cache: Invalidate 'employees*'
     API->>Cache: Invalidate 'orgchart*'
     
@@ -255,7 +258,7 @@ sequenceDiagram
     actor User
     participant UI as Upload Form
     participant API as /api/upload-image
-    participant Supabase as Supabase Storage
+    participant FS as Local File System (public/uploads)
 
     User->>UI: Select Image File
     UI->>API: POST /api/upload-image (FormData)
@@ -267,15 +270,15 @@ sequenceDiagram
     alt Invalid File
         API-->>UI: 400 Bad Request
     else Valid File
-        API->>Supabase: Upload to bucket 'Mil VN Images/uploads/'
-        Supabase-->>API: Public URL
+        API->>FS: fs.writeFile('public/uploads/ID.webp')
+        FS-->>API: File Written
         
-        API-->>UI: 200 OK {url}
+        API-->>UI: 200 OK {url: '/uploads/ID.webp'}
         UI->>UI: Update Image Preview
         UI-->>User: Show Uploaded Image
     end
     
-    Note over Supabase: Images served directly<br/>to client via public URLs
+    Note over FS: Images served directly<br/>by Next.js from public/
 ```
 
 ## 3. Cache Strategy & Invalidation
@@ -323,7 +326,7 @@ flowchart LR
     Reconnect --> Success["✅ Connected"]
     Reconnect --> Failure["❌ Connection Failed"]
     
-    Failure --> LogError["Log Error + Config"]
+    Failure --> LogError["Log Error + Config (localhost:5432)"]
     LogError --> Throw["Throw Error"]
     Throw --> APIError["500 Internal Server Error"]
     
@@ -357,7 +360,7 @@ The `/api/orgchart` endpoint performs complex data transformation:
 
 ```mermaid
 flowchart TD
-    Raw["📊 Raw SQL Rows<br/>(employees table)"] --> Parse["Parse Each Employee"]
+    Raw["📊 Raw SQL Rows<br/>(PostgreSQL employees table)"] --> Parse["Parse Each Employee"]
     
     Parse --> ExtractManager["Extract line_manager<br/>(format: 'ID: Name')"]
     ExtractManager --> TrimZeros["Trim Leading Zeros"]
@@ -373,7 +376,7 @@ flowchart TD
     CreateDept --> AssignParent["Assign Parent<br/>(pid = managerId or Dept)"]
     
     AssignParent --> FormatDates["Format Dates<br/>(Excel Serial → DD/MM/YYYY)"]
-    FormatDates --> GenImageURL["Generate Image URLs<br/>(Supabase Storage)"]
+    FormatDates --> GenImageURL["Generate Image URLs<br/>(/uploads/ID.webp)"]
     
     GenImageURL --> AddTags["Add Tags<br/>(probation, headcount, etc)"]
     AddTags --> Output["🌲 Hierarchical JSON<br/>(OrgChart.js compatible)"]
@@ -389,13 +392,13 @@ sequenceDiagram
     actor User
     participant UI as Employee Form
     participant API as /api/sheet [PUT]
-    participant DB as Azure SQL
+    participant DB as PostgreSQL
     actor Admin
     participant AdminUI as Admin Panel
 
     User->>UI: Change Line Manager
     UI->>API: PUT {pendingLineManager, lineManagerStatus: 'pending', requester}
-    API->>DB: UPDATE employees SET pending_line_manager=..., line_manager_status='pending'
+    API->>DB: UPDATE employees SET pending_line_manager=$1, line_manager_status='pending'
     DB-->>API: Success
     API-->>UI: 200 OK
     
@@ -425,20 +428,20 @@ sequenceDiagram
 
 | Layer | Technology | Purpose |
 |-------|-----------|---------|
-| **Frontend** | Next.js 14+ (App Router) | SSR, Routing, React Components |
+| **Frontend** | Next.js 15+ (App Router) | SSR, Routing, React Components |
 | **State Management** | SWR | Data fetching, caching, revalidation |
-| **Styling** | Tailwind CSS | Utility-first styling |
+| **Styling** | Tailwind CSS 4+ | Utility-first styling |
 | **API Layer** | Next.js API Routes | Serverless backend functions |
-| **Database** | Azure SQL Database | Primary data storage (employees, users, departments) |
-| **ORM/Client** | `mssql` (node-mssql) | Direct SQL queries to Azure SQL |
+| **Database** | PostgreSQL (Local) | Primary data storage (employees, users, departments) |
+| **ORM/Client** | `pg` (node-postgres) | Direct SQL queries to PostgreSQL |
 | **Authentication** | Custom JWT + HttpOnly Cookies | Session management |
-| **Storage** | Supabase Storage | Public image/avatar hosting |
+| **Storage** | Local File System | Image storage in `public/uploads` |
 | **Visualization** | OrgChart.js | Interactive org chart rendering |
 | **Excel Processing** | `xlsx` library | Import/export employee data |
 | **Cache** | In-memory Map | App-level caching (15min TTL) |
 
 ---
 
-**Document Version**: 1.0  
-**Last Updated**: 2026-02-11  
-**Author**: System Analysis
+**Document Version**: 1.1 (Updated to PostgreSQL & Local Storage)  
+**Last Updated**: 2026-02-25  
+**Author**: Antigravity Analysis

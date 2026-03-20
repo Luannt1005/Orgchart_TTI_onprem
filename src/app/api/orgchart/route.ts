@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
-import { getDbConnection, sql } from "@/lib/db";
+import { getDbConnection } from "@/lib/db";
 import { getCachedData } from "@/lib/cache";
 import { isAuthenticated, unauthorizedResponse } from "@/lib/auth-server";
 
 // Cache TTL: 15 minutes for orgchart data
 const ORGCHART_CACHE_TTL = 15 * 60 * 1000;
-const IMAGE_BASE_URL = "https://jugotvbkvknjcxrgyyfq.supabase.co/storage/v1/object/public/Mil%20VN%20Images/uploads/";
+const IMAGE_BASE_URL = "/uploads/";
 
 interface Employee {
   id: string;
@@ -103,16 +103,16 @@ export async function GET(req: Request) {
         console.log(`📡 [Cache MISS] Fetching employees from Azure SQL (dept: ${dept || 'all'})...`);
 
         const pool = await getDbConnection();
-        const request = pool.request();
+        const queryValues: any[] = [];
         let queryStr = "SELECT * FROM employees WHERE emp_id IS NOT NULL AND emp_id <> ''";
 
         if (dept && dept !== "all") {
-          queryStr += " AND dept = @dept";
-          request.input('dept', sql.NVarChar, dept);
+          queryStr += " AND dept = $1";
+          queryValues.push(dept);
         }
 
-        const result = await request.query(queryStr);
-        const employees = result.recordset;
+        const result = await pool.query(queryStr, queryValues);
+        const employees = result.rows;
 
         if (!employees || employees.length === 0) {
           return [];
@@ -126,8 +126,10 @@ export async function GET(req: Request) {
         const empIds = new Set(employees.map((e: Employee) => trimLeadingZeros(e.emp_id) || ""));
 
         employees.forEach((emp: Employee) => {
-          const empId = String(emp.emp_id || "").trim();
-          if (!empId) return;
+          const rawId = String(emp.emp_id || "").trim();
+          if (!rawId) return;
+
+          const empId = trimLeadingZeros(rawId) || rawId;
 
           // Get manager ID
           const managerRaw = emp.line_manager;
